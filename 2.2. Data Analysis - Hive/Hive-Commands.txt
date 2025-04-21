@@ -1,0 +1,112 @@
+-- CREATE TABLE
+CREATE EXTERNAL TABLE IF NOT EXISTS nba_table (
+  EVENTID STRING,
+  EVENTNUM STRING,
+  HOMEDESCRIPTION STRING,
+  PCTIMESTRING STRING,
+  PERIOD INT,
+  PLAYER1_ID STRING,
+  PLAYER1_NAME STRING,
+  PLAYER1_TEAM_ABBREVIATION STRING,
+  PLAYER1_TEAM_CITY STRING,
+  PLAYER1_TEAM_ID STRING,
+  PLAYER1_TEAM_NICKNAME STRING,
+  PLAYER2_ID STRING,
+  PLAYER2_NAME STRING,
+  PLAYER2_TEAM_ABBREVIATION STRING,
+  PLAYER2_TEAM_CITY STRING,
+  PLAYER2_TEAM_ID STRING,
+  PLAYER2_TEAM_NICKNAME STRING,
+  PLAYER3_ID STRING,
+  PLAYER3_NAME STRING,
+  PLAYER3_TEAM_ABBREVIATION STRING,
+  PLAYER3_TEAM_CITY STRING,
+  PLAYER3_TEAM_ID STRING,
+  PLAYER3_TEAM_NICKNAME STRING,
+  SCORE STRING,
+  SCOREMARGIN STRING,
+  VISITORDESCRIPTION STRING
+)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY ','
+STORED AS TEXTFILE
+LOCATION 'hdfs:///user/hive/nba_data';
+
+-- Q1 ----------------------------------
+
+WITH valid_scores AS (
+  SELECT
+    EVENTNUM,
+    PLAYER1_TEAM_NICKNAME AS team,
+    REGEXP_REPLACE(SCORE, '\\s+', '') AS clean_score,
+    PERIOD
+  FROM nba_table
+  WHERE
+    PLAYER1_TEAM_NICKNAME IS NOT NULL
+    AND TRIM(PLAYER1_TEAM_NICKNAME) != ''
+    AND LENGTH(SCORE) > 0
+    AND INSTR(SCORE, '-') > 0
+),
+latest_score_per_match AS (
+  SELECT
+    EVENTNUM,
+    MAX(PERIOD) AS last_period
+  FROM valid_scores
+  GROUP BY EVENTNUM
+),
+final_scores AS (
+  SELECT
+    v.EVENTNUM,
+    v.team,
+    v.clean_score
+  FROM valid_scores v
+  JOIN latest_score_per_match l ON v.EVENTNUM = l.EVENTNUM AND v.PERIOD = l.last_period
+),
+parsed_scores AS (
+  SELECT
+    team,
+    CAST(SPLIT(clean_score, '-')[0] AS INT) AS score1,
+    CAST(SPLIT(clean_score, '-')[1] AS INT) AS score2
+  FROM final_scores
+)
+SELECT
+  team,
+  COUNT(*) AS losses
+FROM parsed_scores
+WHERE score1 < score2
+GROUP BY team
+ORDER BY losses DESC
+LIMIT 5;
+
+
+--Q2
+WITH valid_scores AS (
+  SELECT
+    EVENTNUM,
+    REGEXP_REPLACE(SCORE, '\\s+', '') AS clean_score
+  FROM nba_table
+  WHERE
+    SCORE IS NOT NULL
+    AND LENGTH(SCORE) > 0
+    AND INSTR(SCORE, '-') > 0
+),
+match_scores AS (
+  SELECT
+    EVENTNUM,
+    MAX(clean_score) AS final_score
+  FROM valid_scores
+  GROUP BY EVENTNUM
+),
+parsed_scores AS (
+  SELECT
+    EVENTNUM,
+    CAST(SPLIT(final_score, '-')[0] AS INT) AS score1,
+    CAST(SPLIT(final_score, '-')[1] AS INT) AS score2
+  FROM match_scores
+)
+SELECT
+  EVENTNUM,
+  (score1 + score2) AS total_points
+FROM parsed_scores
+ORDER BY EVENTNUM
+LIMIT 20;
